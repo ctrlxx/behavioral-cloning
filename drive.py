@@ -15,12 +15,26 @@ from io import BytesIO
 from keras.models import load_model
 import h5py
 from keras import __version__ as keras_version
+import scipy.misc
 
 sio = socketio.Server()
 app = Flask(__name__)
 model = None
 prev_image_array = None
 
+def crop(image, top_percent, bottom_percent):
+
+    assert 0 <= top_percent < 0.5, 'top_percent should be between 0.0 and 0.5'
+    assert 0 <= bottom_percent < 0.5, 'top_percent should be between 0.0 and 0.5'
+
+    top = int(np.ceil(image.shape[0] * top_percent))
+    bottom = image.shape[0] - int(np.ceil(image.shape[0] * bottom_percent))
+
+    return image[top:bottom, :]
+
+def resize(image, new_dim):
+
+    return scipy.misc.imresize(image, new_dim)
 
 class SimplePIController:
     def __init__(self, Kp, Ki):
@@ -44,9 +58,8 @@ class SimplePIController:
 
 
 controller = SimplePIController(0.1, 0.002)
-set_speed = 9
+set_speed = 12
 controller.set_desired(set_speed)
-
 
 @sio.on('telemetry')
 def telemetry(sid, data):
@@ -61,7 +74,14 @@ def telemetry(sid, data):
         imgString = data["image"]
         image = Image.open(BytesIO(base64.b64decode(imgString)))
         image_array = np.asarray(image)
-        steering_angle = float(model.predict(image_array[None, :, :, :], batch_size=1))
+        image_array = crop(image_array, 0.35, 0.1)
+        image_array = resize(image_array, new_dim=(64, 64))
+
+        transformed_image_array = image_array[None, :, :, :]
+
+        # This model currently assumes that the features of the model are just the images. Feel free to change this.
+
+        steering_angle = float(model.predict(transformed_image_array, batch_size=1))
 
         throttle = controller.update(float(speed))
 
